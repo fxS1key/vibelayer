@@ -1,24 +1,176 @@
+/* VibeLayer panel styles. Tokens are derived from the active theme — see
+   App.tsx applyTheme(). All sizing is rem-based off 14px root so the same
+   layout fits both the 400×600 popup and the wider side panel. */
+
 :root {
   --bg: #0f1115;
-  --panel: #1a1d24;
+  --bg-elev: #161a22;
+  --bg-elev-2: #1d222c;
+  --border: #2a2f3a;
+  --border-strong: #3a4150;
   --fg: #e6e8ec;
-  --muted: #8b91a0;
+  --fg-muted: #8b91a0;
+  --fg-soft: #a4abbb;
   --accent: #8b5cf6;
+  --accent-hover: #7c3aed;
   --danger: #ef4444;
+  --warn: #f59e0b;
   --ok: #10b981;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color-scheme: dark;
 }
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --bg-elev: #f7f8fa;
+  --bg-elev-2: #eef0f4;
+  --border: #e3e6ed;
+  --border-strong: #c9cfdb;
+  --fg: #1a1d24;
+  --fg-muted: #6b7280;
+  --fg-soft: #4b5563;
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
-.vl-panel { display: flex; flex-direction: column; height: 100%; padding: 12px; gap: 10px; }
-.vl-prompt { width: 100%; min-height: 80px; background: var(--panel); color: var(--fg);
-  border: 1px solid #2a2e38; border-radius: 8px; padding: 10px; resize: vertical; font: inherit; }
-.vl-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-.vl-btn { background: var(--accent); color: white; border: 0; border-radius: 6px;
-  padding: 8px 12px; cursor: pointer; font-weight: 600; }
-.vl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.vl-btn-ghost { background: transparent; border: 1px solid #2a2e38; color: var(--fg); }
-.vl-est { font-size: 12px; color: var(--muted); }
-.vl-preview { flex: 1; background: var(--panel); border-radius: 8px; padding: 10px;
-  overflow: auto; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
-.vl-error { color: var(--danger); font-size: 12px; }
+button { font: inherit; color: inherit; }
+
+/* ---------- App shell ---------- */
+.vl-app { display: flex; flex-direction: column; height: 100vh; min-width: 360px; }
+.vl-app--popup { width: 400px; height: 600px; }
+
+.vl-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.vl-logo {
+  width: 22px; height: 22px; border-radius: 6px;
+  background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+}
+.vl-title { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; flex: 1; }
+.vl-header-actions { display: flex; gap: 4px; }
+
+.vl-tabs {
+  display: flex; gap: 2px;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.vl-tab {
+  flex: 1; background: transparent; border: 0; padding: 8px 6px;
+  color: var(--fg-muted); cursor: pointer; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600; transition: all 120ms;
+}
+.vl-tab:hover { background: var(--bg-elev); color: var(--fg); }
+.vl-tab[aria-selected='true'] { background: var(--bg-elev-2); color: var(--fg); }
+
+.vl-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+/* ---------- Form controls ---------- */
+.vl-stack { display: flex; flex-direction: column; gap: 10px; }
+.vl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vl-row--end { justify-content: flex-end; }
+
+.vl-label { font-size: 12px; color: var(--fg-soft); font-weight: 500; }
+.vl-help { font-size: 11px; color: var(--fg-muted); margin-top: 2px; line-height: 1.4; }
+
+.vl-input, .vl-select, .vl-textarea {
+  width: 100%; background: var(--bg-elev); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 10px; font: inherit; outline: none;
+  transition: border-color 120ms, background 120ms;
+}
+.vl-input:focus, .vl-select:focus, .vl-textarea:focus {
+  border-color: var(--accent); background: var(--bg-elev-2);
+}
+.vl-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+.vl-input--mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+
+/* ---------- Buttons ---------- */
+.vl-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--accent); color: white; border: 0;
+  border-radius: var(--radius-sm); padding: 9px 14px;
+  font-weight: 600; cursor: pointer; transition: background 120ms, transform 60ms;
+}
+.vl-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.vl-btn:active:not(:disabled) { transform: scale(0.98); }
+.vl-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.vl-btn--ghost {
+  background: transparent; color: var(--fg);
+  border: 1px solid var(--border-strong);
+}
+.vl-btn--ghost:hover:not(:disabled) { background: var(--bg-elev); }
+.vl-btn--danger { background: var(--danger); }
+.vl-btn--danger:hover:not(:disabled) { background: #dc2626; }
+.vl-btn--sm { padding: 5px 10px; font-size: 12px; }
+.vl-btn--icon { padding: 6px; width: 30px; height: 30px; background: transparent; color: var(--fg-muted); }
+.vl-btn--icon:hover { background: var(--bg-elev); color: var(--fg); }
+
+/* ---------- Toggle ---------- */
+.vl-toggle {
+  position: relative; width: 36px; height: 20px;
+  background: var(--bg-elev-2); border: 1px solid var(--border-strong);
+  border-radius: 999px; cursor: pointer; transition: background 120ms;
+  flex-shrink: 0;
+}
+.vl-toggle[aria-checked='true'] { background: var(--accent); border-color: var(--accent); }
+.vl-toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--fg);
+  transition: transform 140ms;
+}
+.vl-toggle[aria-checked='true']::after { transform: translateX(16px); background: white; }
+
+/* ---------- Cards ---------- */
+.vl-card {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px;
+}
+.vl-card + .vl-card { margin-top: 10px; }
+.vl-card-title { font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--fg-muted); margin-bottom: 8px; }
+
+/* ---------- Patch list rows ---------- */
+.vl-list { display: flex; flex-direction: column; gap: 6px; }
+.vl-list-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+.vl-list-item:hover { border-color: var(--border-strong); }
+.vl-list-text { flex: 1; min-width: 0; }
+.vl-list-title { font-weight: 600; font-size: 13px; truncate: ellipsis;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vl-list-sub { font-size: 11px; color: var(--fg-muted); margin-top: 2px; }
+
+/* ---------- Misc ---------- */
+.vl-est { font-size: 11px; color: var(--fg-muted); }
+.vl-est-cost { color: var(--fg-soft); font-weight: 600; }
+.vl-error { color: var(--danger); font-size: 12px; padding: 8px;
+  background: rgba(239, 68, 68, 0.1); border-radius: var(--radius-sm); }
 .vl-ok { color: var(--ok); font-size: 12px; }
+.vl-empty { text-align: center; color: var(--fg-muted); padding: 32px 16px; font-size: 13px; }
+.vl-preview { background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px; font-family: ui-monospace, monospace;
+  font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto; }
+.vl-kbd { display: inline-block; padding: 1px 5px; border-radius: 3px;
+  background: var(--bg-elev-2); border: 1px solid var(--border-strong);
+  font-family: ui-monospace, monospace; font-size: 10px; color: var(--fg-soft); }
+
+.vl-search { position: relative; }
+.vl-search .vl-input { padding-left: 30px; }
+.vl-search::before {
+  content: '⌕'; position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--fg-muted); font-size: 14px; pointer-events: none;
+}
+
+/* Scrollbar */
+.vl-body::-webkit-scrollbar { width: 8px; }
+.vl-body::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+.vl-body::-webkit-scrollbar-track { background: transparent; }

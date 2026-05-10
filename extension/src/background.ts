@@ -1,29 +1,31 @@
-// Service worker. Owns: side-panel open/close, message routing between content
-// script and panel, and the cloud-sync SSE listener. We keep zero business logic
-// in the panel itself — it only renders state — so background can survive panel
-// closure without losing work.
+// Service worker.
+// Owns: side panel open/close, popup-side-panel bridge, message routing,
+// keyboard commands, cloud-sync SSE listener.
 
 import type { Patch } from '@vibelayer/shared';
+import { startSyncLoop } from './sync.js';
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {
-    // Some Chromium forks lack sidePanel; we fail open — user can still reach
-    // the panel via the action click event below.
-  });
+  // Don't auto-open panel — we want popup to be the default click target.
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: false })
+    .catch(() => {});
 });
 
-chrome.action.onClicked.addListener(async (tab) => {
-  if (tab.id == null) return;
-  await chrome.sidePanel.open({ tabId: tab.id });
+// Keyboard command: Ctrl/Cmd+Shift+L opens the side panel.
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'open-side-panel') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id != null) await chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// Message bus: panel ↔ background ↔ content. Use one discriminated union so
-// adding a new message type is a single switch case, not three.
+// Message bus between popup / side panel / content / background.
 type Msg =
   | { kind: 'snapshot.request'; tabId: number }
   | { kind: 'snapshot.response'; snapshot: unknown }
   | { kind: 'patch.apply'; tabId: number; patch: Patch }
-  | { kind: 'patch.remove'; tabId: number; patchId: string };
+  | { kind: 'patch.remove'; tabId: number; patchId: string }
+  | { kind: 'open.side-panel' };
 
 chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
   switch (msg.kind) {
@@ -31,19 +33,20 @@ chrome.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
       chrome.tabs.sendMessage(msg.tabId, { kind: 'snapshot.collect' }, (resp) => {
         sendResponse(resp);
       });
-      return true; // keep channel open for async sendResponse
+      return true;
     case 'patch.apply':
-      chrome.tabs.sendMessage(msg.tabId, msg);
-      return false;
     case 'patch.remove':
       chrome.tabs.sendMessage(msg.tabId, msg);
+      return false;
+    case 'open.side-panel':
+      // Triggered from popup's "Expand" button.
+      chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+        if (tab?.id != null) chrome.sidePanel.open({ tabId: tab.id });
+      });
       return false;
     default:
       return false;
   }
 });
 
-// Sync bootstrap. Lives here so it survives panel close. The actual SSE
-// implementation is in lib/sync.ts; background just keeps the connection alive.
-import { startSyncLoop } from './sync.js';
 startSyncLoop();

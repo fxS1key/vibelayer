@@ -7,6 +7,8 @@
 // useful selector than leak a password.
 
 import { applyPatch, removePatch } from './patch-injector.js';
+import { getPatchesForDomain } from './storage.js';
+import { getSettings, isDomainAllowed } from './settings.js';
 import type { Patch } from '@vibelayer/shared';
 
 const PII_PATTERNS = [
@@ -79,3 +81,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   return false;
 });
+
+// Auto-apply saved patches on page load. Two gates must both pass:
+//   * user opted in via settings.autoApply
+//   * current domain is allowed by domainRules (off / blacklist / whitelist)
+// Without these gates a blacklisted site would still get re-skinned every load.
+async function autoApplySavedPatches(): Promise<void> {
+  try {
+    const settings = await getSettings();
+    if (!settings.autoApply) return;
+    if (!isDomainAllowed(settings.domainRules, location.hostname)) return;
+    const patches = await getPatchesForDomain(location.hostname);
+    for (const p of patches) {
+      if (p.enabled && !p.isDeleted) applyPatch(p);
+    }
+  } catch {
+    // Silent: a broken auto-apply shouldn't break the host page.
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => void autoApplySavedPatches(), { once: true });
+} else {
+  void autoApplySavedPatches();
+}
