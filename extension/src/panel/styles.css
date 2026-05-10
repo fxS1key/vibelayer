@@ -1,0 +1,24 @@
+:root {
+  --bg: #0f1115;
+  --panel: #1a1d24;
+  --fg: #e6e8ec;
+  --muted: #8b91a0;
+  --accent: #8b5cf6;
+  --danger: #ef4444;
+  --ok: #10b981;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html, body, #root { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
+.vl-panel { display: flex; flex-direction: column; height: 100%; padding: 12px; gap: 10px; }
+.vl-prompt { width: 100%; min-height: 80px; background: var(--panel); color: var(--fg);
+  border: 1px solid #2a2e38; border-radius: 8px; padding: 10px; resize: vertical; font: inherit; }
+.vl-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.vl-btn { background: var(--accent); color: white; border: 0; border-radius: 6px;
+  padding: 8px 12px; cursor: pointer; font-weight: 600; }
+.vl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.vl-btn-ghost { background: transparent; border: 1px solid #2a2e38; color: var(--fg); }
+.vl-est { font-size: 12px; color: var(--muted); }
+.vl-preview { flex: 1; background: var(--panel); border-radius: 8px; padding: 10px;
+  overflow: auto; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+.vl-error { color: var(--danger); font-size: 12px; }
+.vl-ok { color: var(--ok); font-size: 12px; }
