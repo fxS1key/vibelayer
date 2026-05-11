@@ -12,7 +12,7 @@
 // returns false and the loops no-op.
 
 import { getDirtyPatches, getMeta, markClean, putPatch, setMeta } from './storage.js';
-import type { Patch, VectorClock } from '@vibelayer/shared';
+import { PatchSchema, type VectorClock } from '@vibelayer/shared';
 
 const PUSH_INTERVAL_MS = 15_000;
 
@@ -34,11 +34,16 @@ async function pushOnce(): Promise<void> {
   const deviceId = (await getMeta<string>('deviceId')) ?? crypto.randomUUID();
   await setMeta('deviceId', deviceId);
 
-  const res = await fetch(`${await apiBase()}/api/v1/sync`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ deviceId, patches: dirty }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${await apiBase()}/api/v1/sync`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ deviceId, patches: dirty }),
+    });
+  } catch {
+    return; // server unreachable (e.g. self-hosted not running) — retry next tick
+  }
   if (!res.ok) return; // retry on next tick
 
   // Mark synced patches clean. Conflict resolution result (if any) comes back
@@ -78,13 +83,21 @@ export function startSyncLoop(): void {
 
   // SSE pull. EventSource isn't available in service workers in all browsers
   // yet, so we use fetch + ReadableStream — slightly more code, broader support.
-  void startEventStream();
+  startEventStream().catch(() => {
+    // Server unreachable (e.g. self-hosted not running). Stream stays off until
+    // next startSyncLoop() call — the push loop's catch keeps us alive.
+  });
 }
 
 async function startEventStream(): Promise<void> {
   const headers = await authHeaders();
   if (!headers) return;
-  const res = await fetch(`${await apiBase()}/api/v1/sync/events`, { headers });
+  let res: Response;
+  try {
+    res = await fetch(`${await apiBase()}/api/v1/sync/events`, { headers });
+  } catch {
+    return; // server unreachable
+  }
   if (!res.ok || !res.body) return;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -101,9 +114,13 @@ async function startEventStream(): Promise<void> {
       const data = block.split('\n').find((l) => l.startsWith('data: '))?.slice(6);
       if (!data) continue;
       try {
-        const evt = JSON.parse(data) as { type: string; patch?: Patch };
+        const evt = JSON.parse(data) as { type: string; patch?: unknown };
         if (evt.type === 'patch.updated' && evt.patch) {
-          await putPatch(evt.patch, { markDirty: false });
+          // The server is trusted but not infallible — validate before we let
+          // a remote payload land in IndexedDB. A bad patch is dropped; the
+          // server will resend on next reconnect.
+          const parsed = PatchSchema.safeParse(evt.patch);
+          if (parsed.success) await putPatch(parsed.data, { markDirty: false });
         }
       } catch {
         // ignore malformed events — server will resend

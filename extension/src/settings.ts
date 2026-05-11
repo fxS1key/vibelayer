@@ -114,12 +114,14 @@ export async function recordSpend(usd: number): Promise<void> {
 export async function getSpend(): Promise<{ day: number; month: number }> {
   const data = await chrome.storage.local.get(SPEND_KEY);
   const ledger: SpendEntry[] = (data[SPEND_KEY] as SpendEntry[] | undefined) ?? [];
-  const now = Date.now();
-  const day = now - 24 * 3600 * 1000;
-  const month = now - 30 * 24 * 3600 * 1000;
+  const now = new Date();
+  // Day starts at local midnight; month at the 1st. Users expect "monthly"
+  // limits to reset on the 1st, not on a 30-day sliding window.
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   return {
-    day: ledger.filter((e) => e.ts >= day).reduce((s, e) => s + e.usd, 0),
-    month: ledger.filter((e) => e.ts >= month).reduce((s, e) => s + e.usd, 0),
+    day: ledger.filter((e) => e.ts >= dayStart).reduce((s, e) => s + e.usd, 0),
+    month: ledger.filter((e) => e.ts >= monthStart).reduce((s, e) => s + e.usd, 0),
   };
 }
 
@@ -128,11 +130,12 @@ export async function checkSpendCap(
   estimatedUsd: number,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!cap.enabled) return { ok: true };
+  const { t } = await import('./i18n.js');
   const { day, month } = await getSpend();
   if (day + estimatedUsd > cap.dailyUsd)
-    return { ok: false, reason: `Дневной лимит $${cap.dailyUsd} превышен (потрачено $${day.toFixed(3)}).` };
+    return { ok: false, reason: t('cap.day.exceeded', { cap: cap.dailyUsd, spent: day.toFixed(3) }) };
   if (month + estimatedUsd > cap.monthlyUsd)
-    return { ok: false, reason: `Месячный лимит $${cap.monthlyUsd} превышен (потрачено $${month.toFixed(2)}).` };
+    return { ok: false, reason: t('cap.month.exceeded', { cap: cap.monthlyUsd, spent: month.toFixed(2) }) };
   return { ok: true };
 }
 

@@ -1,9 +1,12 @@
 // Generate tab — the main flow: prompt → estimate → generate → preview → apply.
 
 import { useCallback, useEffect, useState } from 'react';
-import type { GeneratedPatch, Patch } from '@vibelayer/shared';
+import { GeneratedPatchSchema, type GeneratedPatch, type Patch } from '@vibelayer/shared';
 import { getByokKey } from '../../byok.js';
+import { callLlmDirect } from '../../llm-direct.js';
 import { putPatch } from '../../storage.js';
+import { verifyPatchSignature } from '../../verify.js';
+import { t } from '../../i18n.js';
 import {
   checkSpendCap,
   getSettings,
@@ -57,50 +60,77 @@ export function GenerateTab({ settings }: Props) {
     setError(null);
     setNotice(null);
     setPatch(null);
-    if (!tab?.id || !tab.url) return setError('Нет активной вкладки');
-    if (!allowed) return setError(`Домен ${domain} запрещён правилами в настройках.`);
+    if (!tab?.id || !tab.url) return setError(t('tab.generate.empty'));
+    if (!allowed) return setError(t('tab.generate.domainBlocked', { domain }));
 
     const cap = await checkSpendCap(settings.spendCap, costUsd);
     if (!cap.ok) return setError(cap.reason);
 
     if (settings.confirmBeforeGenerate) {
-      const ok = window.confirm(`Сгенерировать патч (~${tokens} токенов, ~$${costUsd.toFixed(3)})?`);
+      const ok = window.confirm(t('tab.generate.confirm', { tokens, cost: costUsd.toFixed(3) }));
       if (!ok) return;
     }
 
     setBusy(true);
     try {
-      const snapshot = await requestSnapshot(tab.id);
+      const snapshot = (await requestSnapshot(tab.id)) as { html?: string } | undefined;
       const byok = await getByokKey();
-      const res = await fetch(`${settings.apiBase}/api/v1/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          snapshot,
+
+      let generated: GeneratedPatch;
+      let tokensUsed: number;
+      let actualCost: number;
+
+      if (byok) {
+        // True BYOK: call the provider directly. No VibeLayer server in the loop.
+        const result = await callLlmDirect({
+          provider: byok.provider,
+          apiKey: byok.apiKey,
           model: settings.model,
-          ...(byok ? { byokKey: byok.apiKey, byokProvider: byok.provider } : {}),
-        }),
-      });
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data = (await res.json()) as {
-        patch: GeneratedPatch;
-        tokensUsed?: number;
-        costUsd?: number;
-      };
-      setPatch(data.patch);
-      await recordSpend(data.costUsd ?? costUsd);
+          prompt,
+          domain,
+          url: tab.url,
+          html: snapshot?.html ?? '',
+        });
+        const parsed = GeneratedPatchSchema.safeParse(result.patch);
+        if (!parsed.success) throw new Error(`LLM returned malformed patch: ${parsed.error.message}`);
+        generated = parsed.data;
+        tokensUsed = result.tokensIn + result.tokensOut;
+        actualCost = result.costUsd;
+      } else {
+        const res = await fetch(`${settings.apiBase}/api/v1/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, snapshot, model: settings.model }),
+        });
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const data = (await res.json()) as {
+          patch: unknown;
+          signature?: string;
+          tokensUsed?: number;
+          costUsd?: number;
+        };
+        const parsed = GeneratedPatchSchema.safeParse(data.patch);
+        if (!parsed.success) throw new Error(`API returned malformed patch: ${parsed.error.message}`);
+        const ok = await verifyPatchSignature(parsed.data, data.signature);
+        if (!ok) throw new Error(t('tab.generate.signatureFailed'));
+        generated = parsed.data;
+        tokensUsed = data.tokensUsed ?? tokens;
+        actualCost = data.costUsd ?? costUsd;
+      }
+
+      setPatch(generated);
+      await recordSpend(actualCost);
       await pushHistory({
         domain,
         prompt,
-        patchDescription: data.patch.description,
-        tokensUsed: data.tokensUsed ?? tokens,
-        costUsd: data.costUsd ?? costUsd,
+        patchDescription: generated.description,
+        tokensUsed,
+        costUsd: actualCost,
         model: settings.model,
         applied: false,
       });
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -128,7 +158,7 @@ export function GenerateTab({ settings }: Props) {
     chrome.tabs.sendMessage(tab.id, { kind: 'patch.apply', tabId: tab.id, patch: p });
     setPatch(null);
     setPrompt('');
-    setNotice('Патч применён и сохранён ✓');
+    setNotice(t('tab.generate.applied'));
   }, [patch, tab]);
 
   const onKey = (e: React.KeyboardEvent) => {

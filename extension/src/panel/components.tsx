@@ -30,7 +30,7 @@ export function Field({
   children,
 }: {
   label: string;
-  help?: string;
+  help?: ReactNode;
   children: ReactNode;
 }) {
   return (

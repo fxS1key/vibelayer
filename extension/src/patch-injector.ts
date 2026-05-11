@@ -9,37 +9,76 @@
 import type { Patch } from '@vibelayer/shared';
 
 const STYLE_ATTR = 'data-vibelayer';
-const workers = new Map<string, Worker>();
 
+interface WorkerEntry {
+  worker: Worker;
+  blobUrl: string;
+}
+const workers = new Map<string, WorkerEntry>();
+
+// Bootstrap runs BEFORE the patch code. We need ONE controlled use of the
+// Function constructor to compile the user patch, so we stash a reference
+// (__compile) FIRST, then poison every escape hatch we know of: direct
+// globals, the Function global, and the `.constructor` chain (so
+// `(function(){}).constructor("...")` and its async/generator variants also
+// fail). After bootstrap, the only way to mutate the page is via the
+// `postPatch` callback, which is mediated by handleWorkerMessage below.
 const WORKER_BOOTSTRAP = `
-  // Block network and storage APIs inside the sandbox. Generated JS that tries
-  // to touch any of these will throw immediately — fail-closed by design.
-  self.fetch = () => { throw new Error('VibeLayer: fetch blocked'); };
-  self.XMLHttpRequest = function() { throw new Error('VibeLayer: XHR blocked'); };
-  self.WebSocket = function() { throw new Error('VibeLayer: WebSocket blocked'); };
-  // eval / Function are blocked by CSP on the worker; we additionally clobber
-  // them so a generated patch can't get a friendly error and retry.
-  self.eval = () => { throw new Error('VibeLayer: eval blocked'); };
-  self.Function = function() { throw new Error('VibeLayer: Function blocked'); };
-  // Workers have no document/localStorage, so cookie / storage exfil is impossible.
+  var __compile = self.Function;
+  (function () {
+    var block = function (name) { return function () { throw new Error('VibeLayer: ' + name + ' blocked'); }; };
+    self.fetch = block('fetch');
+    self.XMLHttpRequest = block('XMLHttpRequest');
+    self.WebSocket = block('WebSocket');
+    self.EventSource = block('EventSource');
+    self.importScripts = block('importScripts');
+    self.eval = block('eval');
+    var FBlock = block('Function');
+    try { Object.defineProperty(Function.prototype, 'constructor', { value: FBlock, writable: false, configurable: false }); } catch (e) {}
+    try { Object.defineProperty((async function(){}).constructor.prototype, 'constructor', { value: FBlock, writable: false, configurable: false }); } catch (e) {}
+    try { Object.defineProperty((function*(){}).constructor.prototype, 'constructor', { value: FBlock, writable: false, configurable: false }); } catch (e) {}
+    try { Object.defineProperty((async function*(){}).constructor.prototype, 'constructor', { value: FBlock, writable: false, configurable: false }); } catch (e) {}
+    self.Function = FBlock;
+  })();
 
-  self.addEventListener('message', (e) => {
-    const { type, payload } = e.data || {};
-    if (type === 'run') {
-      try {
-        // The patch code runs here. It can postMessage DOM mutation instructions
-        // back to the page; it cannot touch the page directly.
-        new Function('postPatch', payload)((msg) => self.postMessage({ type: 'mutate', msg }));
-      } catch (err) {
-        self.postMessage({ type: 'error', message: String(err) });
-      }
+  self.addEventListener('message', function (e) {
+    var data = e.data || {};
+    if (data.type !== 'run') return;
+    var postPatch = function (msg) { self.postMessage({ type: 'mutate', msg: msg }); };
+    try {
+      (__compile('postPatch', data.payload))(postPatch);
+    } catch (err) {
+      self.postMessage({ type: 'error', message: String(err) });
     }
   });
 `;
+// Whitelist for selectors a patch can target via postPatch. Patches that pass
+// an invalid or suspicious selector are silently rejected — better a no-op
+// than a thrown DOMException that the user never sees.
+export function isSafeSelector(sel: string): boolean {
+  if (typeof sel !== 'string') return false;
+  if (sel.length === 0 || sel.length > 1000) return false;
+  // Disallow shadow-piercing / scope cheats and clear injection markers.
+  // `>` alone is the valid CSS child combinator — only block `<` (no CSS use)
+  // and the shadow-piercing `>>>`.
+  if (/</.test(sel)) return false;
+  if (/>>>/.test(sel)) return false;
+  if (/:scope\b/i.test(sel)) return false;
+  if (typeof document === 'undefined') {
+    // Test/runtime without a DOM — accept after the cheap regex checks pass.
+    return true;
+  }
+  try {
+    document.createDocumentFragment().querySelector(sel);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function applyPatch(patch: Patch): void {
-  // 1. CSS — straightforward style tag, scoped by data-vibelayer id.
   removePatch(patch.id); // idempotent re-apply
+
   if (patch.css.trim()) {
     const style = document.createElement('style');
     style.setAttribute(STYLE_ATTR, patch.id);
@@ -47,26 +86,25 @@ export function applyPatch(patch: Patch): void {
     document.head.appendChild(style);
   }
 
-  // 2. JS — sandbox in a Worker. The worker posts mutation messages that we
-  // execute here in a restricted vocabulary (set/remove attr, hide, replace text).
   if (patch.js.trim()) {
-    const blob = new Blob([WORKER_BOOTSTRAP + '\n' + `self.postMessage({type:'ready'});`], {
-      type: 'application/javascript',
-    });
-    const worker = new Worker(URL.createObjectURL(blob));
+    const blob = new Blob([WORKER_BOOTSTRAP], { type: 'application/javascript' });
+    const blobUrl = URL.createObjectURL(blob);
+    const worker = new Worker(blobUrl);
     worker.onmessage = (e) => handleWorkerMessage(patch.id, e.data);
+    worker.onerror = () => removePatch(patch.id);
     worker.postMessage({ type: 'run', payload: patch.js });
-    workers.set(patch.id, worker);
+    workers.set(patch.id, { worker, blobUrl });
   }
 }
 
 export function removePatch(patchId: string): void {
-  document.querySelectorAll(`style[${STYLE_ATTR}="${CSS.escape(patchId)}"]`).forEach((el) =>
-    el.remove(),
-  );
-  const w = workers.get(patchId);
-  if (w) {
-    w.terminate();
+  document
+    .querySelectorAll(`style[${STYLE_ATTR}="${CSS.escape(patchId)}"]`)
+    .forEach((el) => el.remove());
+  const entry = workers.get(patchId);
+  if (entry) {
+    entry.worker.terminate();
+    URL.revokeObjectURL(entry.blobUrl);
     workers.delete(patchId);
   }
 }
@@ -76,7 +114,15 @@ function handleWorkerMessage(_patchId: string, data: unknown): void {
   if (!data || typeof data !== 'object') return;
   const d = data as { type: string; msg?: { op: string; selector?: string; value?: string } };
   if (d.type !== 'mutate' || !d.msg?.selector) return;
-  const els = document.querySelectorAll(d.msg.selector);
+  if (!isSafeSelector(d.msg.selector)) return;
+
+  let els: NodeListOf<Element>;
+  try {
+    els = document.querySelectorAll(d.msg.selector);
+  } catch {
+    return;
+  }
+
   switch (d.msg.op) {
     case 'hide':
       els.forEach((el) => ((el as HTMLElement).style.display = 'none'));
@@ -88,7 +134,9 @@ function handleWorkerMessage(_patchId: string, data: unknown): void {
       // value format: "name=value"
       if (d.msg.value) {
         const [name, ...rest] = d.msg.value.split('=');
-        if (name) els.forEach((el) => el.setAttribute(name, rest.join('=')));
+        if (name && /^[a-zA-Z_:][a-zA-Z0-9_.:-]*$/.test(name)) {
+          els.forEach((el) => el.setAttribute(name, rest.join('=')));
+        }
       }
       break;
   }

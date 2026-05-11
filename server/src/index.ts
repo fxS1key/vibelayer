@@ -21,7 +21,25 @@ await app.register(cors, {
   credentials: true,
 });
 await app.register(jwt, { secret: process.env.JWT_SECRET ?? 'dev-secret-change-me' });
-await app.register(rateLimit, { max: 200, timeWindow: '1 minute' });
+await app.register(rateLimit, {
+  max: 200,
+  timeWindow: '1 minute',
+  // Bucket by userId when the request is authenticated, otherwise by IP. A
+  // single attacker can't deplete the global allowance any more, and signed-in
+  // users get their own quota independent of noisy neighbors.
+  keyGenerator: (req) => {
+    const auth = req.headers.authorization;
+    if (auth?.startsWith('Bearer ')) {
+      try {
+        const decoded = app.jwt.decode<{ sub?: string }>(auth.slice(7));
+        if (decoded?.sub) return `u:${decoded.sub}`;
+      } catch {
+        // fall through to IP
+      }
+    }
+    return `ip:${req.ip}`;
+  },
+});
 
 app.get('/health', async () => ({ ok: true }));
 

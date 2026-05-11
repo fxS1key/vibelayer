@@ -17,6 +17,11 @@ export const PatchSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   isDeleted: z.boolean().default(false),
+  // Populated when a sync push detects concurrent edits — UI surfaces a merge
+  // prompt. Holds the remote candidate so the user can pick local vs remote.
+  conflictedRemote: z
+    .object({ css: z.string(), js: z.string(), updatedAt: z.string().datetime() })
+    .optional(),
 });
 export type Patch = z.infer<typeof PatchSchema>;
 

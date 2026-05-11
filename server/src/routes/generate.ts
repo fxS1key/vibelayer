@@ -16,6 +16,7 @@ import {
 } from '../prompts/generate-patch.js';
 import { callLlm } from '../lib/llm.js';
 import { staticCheck } from '../lib/sandbox-check.js';
+import { signPatch } from '../lib/signing.js';
 import { requireAuth, type AuthedRequest } from '../lib/auth.js';
 
 export async function generateRoutes(app: FastifyInstance): Promise<void> {
@@ -35,8 +36,8 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
         url: snapshot.url,
         html: snapshot.html,
       }),
-      byok: byokKey && byokProvider ? { provider: byokProvider, apiKey: byokKey } : undefined,
-      model,
+      ...(byokKey && byokProvider ? { byok: { provider: byokProvider, apiKey: byokKey } } : {}),
+      ...(model ? { model } : {}),
     });
 
     let patch;
@@ -59,8 +60,11 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
     // TODO: deduct from token_ledger here (skipped for BYOK). Insert usage row.
     void userId;
 
+    const signed = signPatch(patch);
+
     return reply.send({
-      patch,
+      patch: signed.patch,
+      signature: signed.signature,
       tokensUsed: totalTokens,
       costUsd,
       model: llm.model,

@@ -12,7 +12,8 @@ import {
   type LlmModel,
 } from '../../settings.js';
 import { deletePatch, getAllPatches, putPatch } from '../../storage.js';
-import type { Patch } from '@vibelayer/shared';
+import { PatchSchema } from '@vibelayer/shared';
+import { t } from '../../i18n.js';
 import { Card, Field, Input, Select, Toggle } from '../components.js';
 
 interface Props {
@@ -78,12 +79,22 @@ export function SettingsTab({ settings, onChange }: Props) {
   const importAll = async (file: File) => {
     const text = await file.text();
     try {
-      const arr = JSON.parse(text) as Patch[];
-      if (!Array.isArray(arr)) throw new Error('Ожидается массив патчей');
-      for (const p of arr) await putPatch(p, { markDirty: true });
-      alert(`Импортировано: ${arr.length}`);
+      const raw = JSON.parse(text);
+      if (!Array.isArray(raw)) throw new Error(t('import.expectsArray'));
+      let ok = 0;
+      let skipped = 0;
+      for (const p of raw) {
+        const parsed = PatchSchema.safeParse(p);
+        if (parsed.success) {
+          await putPatch(parsed.data, { markDirty: true });
+          ok++;
+        } else {
+          skipped++;
+        }
+      }
+      alert(skipped > 0 ? t('import.resultWithSkipped', { ok, skipped }) : t('import.result', { ok }));
     } catch (e) {
-      alert(`Ошибка импорта: ${e}`);
+      alert(t('import.error', { msg: e instanceof Error ? e.message : String(e) }));
     }
   };
 

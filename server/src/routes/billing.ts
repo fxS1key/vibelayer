@@ -15,7 +15,10 @@ const TopupBody = z.object({
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const stripe = stripeKey ? new Stripe(stripeKey, { apiVersion: '2024-06-20' }) : null;
+  // apiVersion is intentionally omitted: the Stripe SDK pins itself to the
+  // version it was published with, which is what we want. Specifying a literal
+  // value here couples our source to a particular SDK release.
+  const stripe = stripeKey ? new Stripe(stripeKey) : null;
 
   app.post('/billing/topup', { preHandler: requireAuth }, async (req, reply) => {
     if (!stripe) return reply.code(503).send({ error: 'billing_disabled' });
